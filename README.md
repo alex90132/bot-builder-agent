@@ -28,7 +28,7 @@ Telegram-бот, который собирает и правит ботов в [
 
 ## Быстрый старт
 
-Нужны Go 1.26, токен этого бота от BotFather, ключ OpenRouter и уже запущенный конструктор.
+Нужны Go 1.26, токен этого бота от BotFather, ключ OpenRouter и уже запущенный конструктор. Картинки заработают, если модель в `AI_MODEL` их принимает. Поиск заработает после раздела «Поиск в интернете».
 
 1. Скопируйте окружение и заполните его.
 
@@ -47,6 +47,57 @@ go run ./cmd/bot-builder-agent
 5. Напишите задачу обычным сообщением: какого бота собрать или что изменить.
 
 Проверка без сети и без Telegram: `go test ./...`.
+
+## Поиск в интернете
+
+В комплекте бота SearXNG нет. Его ставят отдельно, один раз, рядом с ботом. Пока он не отвечает, конструктор, меню и картинки работают, а `web_search` и `fetch_url` сообщают, что поиск недоступен.
+
+Нужен Docker. Каталог может лежать где угодно, это не каталог бота.
+
+```bash
+mkdir -p searxng/core-config
+cd searxng
+curl -fsSL \
+  -O https://raw.githubusercontent.com/searxng/searxng/master/container/docker-compose.yml \
+  -O https://raw.githubusercontent.com/searxng/searxng/master/container/.env.example
+cp .env.example .env
+```
+
+В `searxng/.env` (это файл SearXNG, не `.env` бота) задайте порт, на котором бот его ждёт по умолчанию:
+
+```bash
+SEARXNG_PORT=8890
+SEARXNG_BASE_URL=http://localhost:8890/
+SEARXNG_LIMITER=false
+```
+
+Формат JSON у SearXNG по умолчанию закрыт. Без него бот получит отказ вместо выдачи. До `docker compose up` создайте `core-config/settings.yml`:
+
+```yaml
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  limiter: false
+  secret_key: "смените-на-длинную-случайную-строку"
+```
+
+Если контейнер уже запускали и в `core-config/settings.yml` лежит чужой файл, допишите `json` в `search.formats` и выставьте `server.limiter: false`.
+
+```bash
+docker compose up -d
+curl -sS "http://localhost:8890/search?q=test&format=json"
+```
+
+В ответе нужен JSON с полем `results`. Пустой список или ошибка движка смотрите так: `docker compose logs -f core`. Остановить: `docker compose down`.
+
+В `.env` бота оставьте `SEARXNG_URL=http://localhost:8890`. Если SearXNG уже стоит на другом порту, второй раз его поднимать не нужно: запишите свой адрес в `SEARXNG_URL`.
+
+SearXNG сам ходит в Google, DuckDuckGo, Yandex и Wikipedia, машине нужен выход в интернет. Этот экземпляр для бота на своей машине: в интернет его лучше не публиковать. Если бот находит ссылки, а страницы не открываются, задайте `WEB_PROXY` (`http://` или `socks5://`). Прокси должен быть доступен процессу бота.
 
 ## Окружение
 
@@ -91,7 +142,7 @@ go run ./cmd/bot-builder-agent
 
 Картинку из чата бот скачивает и передаёт модели вместе с текстом. В историю байты фото не пишутся.
 
-Поиск идёт через свой SearXNG (`SEARXNG_URL`, по умолчанию `http://localhost:8890`). Модель вызывает `web_search`, затем `fetch_url`, чтобы прочитать страницу, а не отвечать по короткой выжимке. `WEB_PROXY` необязателен: `http://` или `socks5://` для открытия чужих сайтов.
+Поиск идёт через свой SearXNG. Как его поднять и проверить, написано в разделе «Поиск в интернете». Модель вызывает `web_search`, затем `fetch_url`, чтобы прочитать страницу, а не отвечать по короткой выжимке.
 
 ## Как бот ходит в конструктор
 
