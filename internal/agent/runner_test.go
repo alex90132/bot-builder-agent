@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +30,60 @@ func TestPromptHidesToken(t *testing.T) {
 	if !strings.Contains(p, "только если пользователь явно попросил") {
 		t.Fatal("промпт должен запрещать выдуманные опасные действия")
 	}
+}
+
+func TestRemoteFailureStillAnswersInText(t *testing.T) {
+	var body string
+	orSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		writeChoice(w, "сервер docs не отвечает, остальные вызовы доступны", "")
+	}))
+	defer orSrv.Close()
+	orClient, err := openrouter.NewAt("test-key", orSrv.URL+"/v1", orSrv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &Runner{
+		OR: orClient, Remotes: downRemotes{}, Model: "test-model",
+		MaxRounds: 2, MaxResultChars: 1000, MaxTokens: 50,
+	}
+	res, err := runner.Run(context.Background(), Request{UserID: 7, UserText: "что с серверами"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "docs: connection refused") {
+		t.Fatal(body)
+	}
+	if strings.Contains(body, "латиниц") {
+		t.Fatal("промпт конструктора ушёл без конструктора")
+	}
+	if !strings.Contains(body, "web_search") || !strings.Contains(body, "notes__ping") {
+		t.Fatal(body)
+	}
+	if !strings.Contains(res.Reply, "не отвечает") {
+		t.Fatal(res.Reply)
+	}
+}
+
+type downRemotes struct{}
+
+func (downRemotes) Catalog(context.Context, int64) (RemoteSet, error) {
+	return RemoteSet{
+		Failures: []string{"docs: connection refused"},
+		Tools: []Remote{{
+			PublicName:  "notes__ping",
+			Original:    "ping",
+			ServerName:  "notes",
+			Description: "ping",
+			Schema:      []byte(`{"type":"object","properties":{}}`),
+		}},
+	}, nil
+}
+
+func (downRemotes) Call(context.Context, int64, string, json.RawMessage) (string, bool, error) {
+	return "", false, errors.New("вызов не ожидался")
 }
 
 func TestTextualCall(t *testing.T) {

@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"bot-builder-agent/internal/agent"
 	"bot-builder-agent/internal/config"
 	"bot-builder-agent/internal/logger"
 	"bot-builder-agent/internal/mcp"
+	"bot-builder-agent/internal/mcphub"
 	"bot-builder-agent/internal/openrouter"
 	"bot-builder-agent/internal/store"
 	"bot-builder-agent/internal/telegram"
@@ -42,9 +44,27 @@ func (a *App) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	hub := mcphub.New(st, a.cfg.BuilderURL, time.Duration(a.cfg.ToolsCacheSec)*time.Second)
+	hub.AllowPrivate = a.cfg.AllowPrivate
+	hub.PublicURL = a.cfg.OAuthPublicURL
+	if a.cfg.OAuthListen != "" {
+		srv := &http.Server{Addr: a.cfg.OAuthListen, Handler: hub, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				a.log.Error("oauth callback: %v", err)
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(shutdownCtx)
+		}()
+	}
 	runner := &agent.Runner{
 		OR:             orClient,
 		MCP:            mcpClient,
+		Remotes:        hub,
 		Model:          a.cfg.AIModel,
 		MaxRounds:      a.cfg.MaxRounds,
 		MaxResultChars: a.cfg.MaxResultChars,
@@ -52,7 +72,7 @@ func (a *App) Run(ctx context.Context) error {
 		Temperature:    float32(a.cfg.AITemperature),
 		Web:            websearch.New(a.cfg.SearxURL, a.cfg.WebProxy),
 	}
-	bot, err := telegram.New(a.cfg, a.log, st, mcpClient, runner)
+	bot, err := telegram.New(a.cfg, a.log, st, mcpClient, runner, hub)
 	if err != nil {
 		return err
 	}

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"bot-builder-agent/internal/mcp"
 )
 
 // Message — одна реплика истории, включая вызовы инструментов.
@@ -121,7 +123,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(telegram_user_id, id);
 	if err != nil {
 		return err
 	}
-	return s.ensureMCPURL()
+	if err := s.ensureMCPURL(); err != nil {
+		return err
+	}
+	return s.migrateServers()
 }
 
 func (s *Store) ensureMCPURL() error {
@@ -171,6 +176,24 @@ ON CONFLICT(telegram_user_id) DO UPDATE SET
   mcp_url=excluded.mcp_url,
   updated_at=excluded.updated_at
 `, userID, token, endpoint, now)
+	if err != nil {
+		return err
+	}
+	creds := mcp.Credentials{Token: token}
+	raw, err := creds.JSON()
+	if err != nil {
+		return err
+	}
+	_, err = s.insertServer(ctx, Server{
+		UserID:    userID,
+		Name:      mcp.BuilderName,
+		URL:       endpoint,
+		Transport: "streamable",
+		AuthKind:  mcp.AuthBearer,
+		AuthJSON:  raw,
+		Enabled:   true,
+		Builder:   true,
+	})
 	return err
 }
 
@@ -195,6 +218,10 @@ func (s *Store) Logout(ctx context.Context, userID int64) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE users SET mcp_token='', mcp_url='', active_project_id=0, updated_at=? WHERE telegram_user_id=?
 `, now, userID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM mcp_servers WHERE telegram_user_id=? AND builder=1`, userID)
 	return err
 }
 

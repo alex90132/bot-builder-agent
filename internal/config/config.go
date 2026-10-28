@@ -37,6 +37,10 @@ type Config struct {
 
 	SearxURL string
 	WebProxy string
+
+	AllowPrivate   bool
+	OAuthPublicURL string
+	OAuthListen    string
 }
 
 // Load читает .env и окружение. Уже заданные переменные .env не затирает.
@@ -57,6 +61,9 @@ func FromEnv() (*Config, error) {
 		LogFile:          envDefault("LOG_FILE", "logs/bot-builder-agent.log"),
 		SearxURL:         envDefault("SEARXNG_URL", "http://localhost:8890"),
 		WebProxy:         strings.TrimSpace(os.Getenv("WEB_PROXY")),
+		AllowPrivate:     envBool("MCP_ALLOW_PRIVATE", true),
+		OAuthPublicURL:   strings.TrimSpace(os.Getenv("OAUTH_PUBLIC_URL")),
+		OAuthListen:      envDefault("OAUTH_LISTEN", "127.0.0.1:8787"),
 	}
 	if cfg.TelegramBotToken == "" {
 		return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN не задан")
@@ -134,6 +141,21 @@ func (c *Config) Allowed(userID int64) bool {
 		}
 	}
 	return false
+}
+
+func envBool(key string, def bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
 }
 
 func envDefault(key, def string) string {

@@ -56,8 +56,8 @@ func TestMenuTextIsNotAgentTask(t *testing.T) {
 	if task.Kind != KindAskAgent || task.Payload != "собери бота с /start" {
 		t.Fatalf("%+v", task)
 	}
-	if Handle(Input{State: StateMain, HasToken: false, Allowed: true, Text: "привет"}).Kind != KindNeedAccount {
-		t.Fatal("без токена нельзя в задачу")
+	if Handle(Input{State: StateMain, HasToken: false, Allowed: true, Text: "привет"}).Kind != KindAskAgent {
+		t.Fatal("без токена конструктора задача всё равно уходит агенту")
 	}
 }
 
@@ -70,8 +70,8 @@ func TestFreeTextAsksAgentFromMenuScreens(t *testing.T) {
 		}
 	}
 	account := Handle(Input{State: StateAccount, HasToken: false, Allowed: true, Text: text})
-	if account.Kind != KindNeedAccount {
-		t.Fatalf("без токена: %+v", account)
+	if account.Kind != KindAskAgent {
+		t.Fatalf("без токена конструктора: %+v", account)
 	}
 	created := Handle(Input{State: StateWaitProjectName, HasToken: true, Allowed: true, Text: "Магазин"})
 	if created.Kind != KindCreateProject || created.Payload != "Магазин" || created.Next != StateProjects {
@@ -109,6 +109,11 @@ func TestAllowlistAndTokenWait(t *testing.T) {
 	bare := Handle(Input{State: StateProjects, Allowed: true, HasToken: true, Text: "mcp_zzzzzzzz"})
 	if bare.Kind != KindSaveMCPToken {
 		t.Fatal("голый mcp-токен")
+	}
+	several := `{"mcpServers":{"notes":{"url":"https://notes.example.com/mcp?x=1"},"docs":{"url":"https://docs.example.com/v1","headers":{"Authorization":"Bearer plain-token"}}}}`
+	imported := Handle(Input{State: StateMain, Allowed: true, Text: several})
+	if imported.Kind != KindImportServers || imported.Payload != several {
+		t.Fatalf("импорт: %+v", imported)
 	}
 }
 
@@ -205,11 +210,12 @@ func TestMenuCallbackReturnsMainActions(t *testing.T) {
 	for _, data := range ui.CallbacksOf(account) {
 		got := Handle(withCB(base, data))
 		label := map[string]string{
-			"nav:token":  ui.BtnToken,
-			"nav:status": ui.BtnStatus,
-			"nav:reset":  ui.BtnReset,
-			"nav:logout": ui.BtnLogout,
-			"nav:back":   ui.BtnBack,
+			"nav:servers": ui.BtnServers,
+			"nav:token":   ui.BtnToken,
+			"nav:status":  ui.BtnStatus,
+			"nav:reset":   ui.BtnReset,
+			"nav:logout":  ui.BtnLogout,
+			"nav:back":    ui.BtnBack,
 		}[data]
 		if label == "" {
 			t.Fatalf("лишняя кнопка аккаунта %s", data)

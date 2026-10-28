@@ -22,6 +22,11 @@ const (
 	StateWaitProjectName State = "wait_project"
 	StateWaitRename      State = "wait_rename"
 	StateWaitBotToken    State = "wait_bot"
+	StateServers         State = "servers"
+	StateWaitSrvName     State = "wait_srv_name"
+	StateWaitSrvURL      State = "wait_srv_url"
+	StateWaitSrvSecret   State = "wait_srv_secret"
+	StateWaitSrvChoice   State = "wait_srv_choice"
 )
 
 // Kind — что сделать адаптеру Telegram, не вызывая модель самостоятельно.
@@ -64,6 +69,20 @@ const (
 	KindAddBotToken      Kind = "add_bot_token"
 	KindAskAgent         Kind = "ask_agent"
 	KindStopRun          Kind = "stop_run"
+	KindListServers      Kind = "list_servers"
+	KindServerCard       Kind = "server_card"
+	KindAskServerName    Kind = "ask_server_name"
+	KindServerNamed      Kind = "server_named"
+	KindServerURL        Kind = "server_url"
+	KindSetTransport     Kind = "set_transport"
+	KindSetAuthKind      Kind = "set_auth_kind"
+	KindSaveServerSecret Kind = "save_server_secret"
+	KindToggleServer     Kind = "toggle_server"
+	KindAskDeleteServer  Kind = "ask_delete_server"
+	KindDeleteServer     Kind = "delete_server"
+	KindCheckServer      Kind = "check_server"
+	KindBeginOAuth       Kind = "begin_oauth"
+	KindImportServers    Kind = "import_servers"
 )
 
 // Input — снимок экрана и входящее сообщение.
@@ -89,6 +108,8 @@ type Result struct {
 	Endpoint  string
 	ProjectID int64
 	TokenID   int64
+	ServerID  int64
+	Enabled   bool
 	Page      int
 	Days      int
 	Archived  bool
@@ -115,10 +136,27 @@ func Handle(in Input) Result {
 	if ui.MenuText(in.Text) {
 		return fromButton(in, in.Text)
 	}
-	if token, endpoint, ok := mcp.ParseAccess(in.Text); ok {
-		return saveAccess(token, endpoint)
+	if res, ok := accessOrImport(in.Text); ok {
+		return res
 	}
 	return fromFreeText(in)
+}
+
+func accessOrImport(raw string) (Result, bool) {
+	specs, ok := mcp.ParseServers(raw)
+	if !ok {
+		return Result{}, false
+	}
+	if len(specs) == 1 && specs[0].Builder && specs[0].AuthKind == mcp.AuthBearer && textIsBuilder(specs[0]) {
+		if token, endpoint, ok := mcp.ParseAccess(raw); ok {
+			return saveAccess(token, endpoint), true
+		}
+	}
+	return Result{Kind: KindImportServers, Next: StateServers, Payload: raw, Text: "Импорт серверов"}, true
+}
+
+func textIsBuilder(spec mcp.Spec) bool {
+	return spec.Builder && (spec.Creds.Token == "" || strings.HasPrefix(spec.Creds.Token, "mcp_"))
 }
 
 func saveAccess(token, endpoint string) Result {
@@ -145,8 +183,8 @@ func fromCommand(in Input, cmd, args string) Result {
 		if args == "" {
 			return Result{Kind: KindReply, Next: StateWaitMCP, Text: accessHint}
 		}
-		if token, endpoint, ok := mcp.ParseAccess(args); ok {
-			return saveAccess(token, endpoint)
+		if res, ok := accessOrImport(args); ok {
+			return res
 		}
 		return Result{Kind: KindReply, Next: StateWaitMCP, Text: accessHint}
 	case "status":
@@ -159,6 +197,8 @@ func fromCommand(in Input, cmd, args string) Result {
 		return Result{Kind: KindResetHistory, Next: in.State, Text: "Диалог очищен."}
 	case "logout":
 		return Result{Kind: KindAskLogout, Next: in.State, Text: "Удалить сохранённый токен?"}
+	case "servers":
+		return Result{Kind: KindListServers, Next: StateServers, Text: "Серверы"}
 	case "cancel":
 		return cancel(in)
 	default:
@@ -199,6 +239,8 @@ func fromButton(in Input, label string) Result {
 			return listProjects(in, false, 0)
 		}
 		return Result{Kind: KindAskBotToken, Next: StateWaitBotToken, Text: "Пришлите токен от @BotFather."}
+	case ui.BtnServers:
+		return Result{Kind: KindListServers, Next: StateServers, Text: "Серверы"}
 	case ui.BtnBack, ui.BtnCancel:
 		return cancel(in)
 	default:
@@ -225,7 +267,24 @@ func fromFreeText(in Input) Result {
 			return Result{Kind: KindReply, Next: StateWaitBotToken, Text: "Нужен токен BotFather вида 123456:ABC…"}
 		}
 		return Result{Kind: KindAddBotToken, Next: StateBots, Payload: in.Text, ProjectID: in.ActiveProject}
-	case StateMain, StateChat, StateAccount, StateProjects, StateBots:
+	case StateWaitSrvName:
+		if in.Text == "" {
+			return Result{Kind: KindReply, Next: StateWaitSrvName, Text: "Введите имя сервера."}
+		}
+		return Result{Kind: KindServerNamed, Next: StateWaitSrvURL, Payload: in.Text}
+	case StateWaitSrvURL:
+		if in.Text == "" {
+			return Result{Kind: KindReply, Next: StateWaitSrvURL, Text: "Пришлите URL сервера."}
+		}
+		return Result{Kind: KindServerURL, Next: StateWaitSrvChoice, Payload: in.Text}
+	case StateWaitSrvSecret:
+		if in.Text == "" {
+			return Result{Kind: KindReply, Next: StateWaitSrvSecret, Text: "Пришлите данные доступа или - для пустого значения."}
+		}
+		return Result{Kind: KindSaveServerSecret, Next: StateServers, Payload: in.Text}
+	case StateWaitSrvChoice:
+		return Result{Kind: KindReply, Next: StateWaitSrvChoice, Text: "Выберите кнопку под сообщением."}
+	case StateMain, StateChat, StateAccount, StateProjects, StateBots, StateServers:
 		return askFromText(in)
 	default:
 		return Result{Kind: KindReply, Next: in.State, Text: "Выберите кнопку меню."}
@@ -233,9 +292,6 @@ func fromFreeText(in Input) Result {
 }
 
 func askFromText(in Input) Result {
-	if !in.HasToken {
-		return needAccount(in)
-	}
 	if in.Text == "" {
 		if in.HasImage {
 			return Result{Kind: KindAskAgent, Next: StateChat, Payload: "Что на изображении?"}
@@ -258,6 +314,9 @@ func fromCallback(in Input) Result {
 			return Result{Kind: KindReply, Next: StateChat, Text: groupTaskText}
 		}
 		return fromButton(in, label)
+	}
+	if strings.HasPrefix(cb.Name, "srv_") {
+		return serverCallback(in, cb)
 	}
 	if cb.Name != "run_stop" && cb.Name != "logout" && !in.HasToken {
 		return needAccount(in)
@@ -329,11 +388,48 @@ func fromCallback(in Input) Result {
 	}
 }
 
+func serverCallback(in Input, cb ui.Callback) Result {
+	switch cb.Name {
+	case "srv_list":
+		return Result{Kind: KindListServers, Next: StateServers, Text: "Серверы"}
+	case "srv_add":
+		return Result{Kind: KindAskServerName, Next: StateWaitSrvName, Text: "Введите короткое имя сервера."}
+	case "srv_open":
+		return Result{Kind: KindServerCard, Next: StateServers, ServerID: cb.ServerID}
+	case "srv_on":
+		return Result{Kind: KindToggleServer, Next: StateServers, ServerID: cb.ServerID, Enabled: true}
+	case "srv_off":
+		return Result{Kind: KindToggleServer, Next: StateServers, ServerID: cb.ServerID, Enabled: false}
+	case "srv_check":
+		return Result{Kind: KindCheckServer, Next: StateServers, ServerID: cb.ServerID}
+	case "srv_url":
+		return Result{Kind: KindReply, Next: StateWaitSrvURL, ServerID: cb.ServerID, Text: "Пришлите новый URL. Путь и query сохранятся."}
+	case "srv_oauth":
+		return Result{Kind: KindBeginOAuth, Next: StateServers, ServerID: cb.ServerID}
+	case "srv_del_ask":
+		return Result{Kind: KindAskDeleteServer, Next: StateServers, ServerID: cb.ServerID, Text: "Удалить этот MCP-сервер?"}
+	case "srv_del":
+		if !cb.Yes {
+			return Result{Kind: KindServerCard, Next: StateServers, ServerID: cb.ServerID, Text: "Сервер на месте."}
+		}
+		return Result{Kind: KindDeleteServer, Next: StateServers, ServerID: cb.ServerID}
+	case "srv_transport":
+		return Result{Kind: KindSetTransport, Next: StateWaitSrvChoice, ServerID: cb.ServerID, Payload: cb.Screen, Text: "Транспорт выбран. Теперь выберите доступ."}
+	case "srv_auth":
+		return Result{Kind: KindSetAuthKind, Next: authNext(cb.Screen), ServerID: cb.ServerID, Payload: cb.Screen, Text: authHint(cb.Screen)}
+	default:
+		return Result{Kind: KindReply, Next: in.State, Text: "Не понял кнопку сервера."}
+	}
+}
+
 func openMenu(in Input, screen string) Result {
 	next := in.State
 	switch screen {
 	case "account":
 		next = StateAccount
+	case "servers":
+		next = StateServers
+		return Result{Kind: KindListServers, Next: next, Payload: screen, Text: "Серверы"}
 	case "projects":
 		next = StateProjects
 	case "bots":
@@ -376,6 +472,8 @@ func navButton(name string) (string, bool) {
 		return ui.BtnArchive, true
 	case "nav_connect":
 		return ui.BtnConnect, true
+	case "nav_servers":
+		return ui.BtnServers, true
 	default:
 		return "", false
 	}
@@ -410,6 +508,8 @@ func cancel(in Input) Result {
 		return Result{Kind: KindReply, Next: StateBots, Text: "Отменено."}
 	case StateWaitMCP:
 		return Result{Kind: KindReply, Next: StateAccount, Text: "Отменено."}
+	case StateWaitSrvName, StateWaitSrvURL, StateWaitSrvSecret, StateWaitSrvChoice, StateServers:
+		return Result{Kind: KindListServers, Next: StateServers, Text: "Серверы"}
 	default:
 		return Result{Kind: KindReply, Next: StateMain, Text: "Главное меню"}
 	}
@@ -439,4 +539,32 @@ const startText = "Я собираю и правлю ботов в констр�
 
 const groupTaskText = "Напишите задачу ответом на сообщение бота или упомяните его. Сообщение без обращения в группе бот не читает."
 
-const helpText = "Напишите задачу обычным сообщением — я начну её сразу.\nКнопки внизу повторяют команды.\n/token сохранить блок mcpServers или токен mcp_…\n/status статус\n/projects проекты\n/bots боты активного проекта\n/reset очистить диалог\n/logout забыть токен\n/cancel выйти из ввода"
+const helpText = "Напишите задачу обычным сообщением, я начну её сразу.\nКнопки внизу повторяют команды.\n/token сохранить блок mcpServers или токен mcp_…\n/servers список MCP-серверов\n/status статус\n/projects проекты\n/bots боты активного проекта\n/reset очистить диалог\n/logout забыть токен конструктора\n/cancel выйти из ввода"
+
+func authNext(kind string) State {
+	switch kind {
+	case mcp.AuthNone:
+		return StateServers
+	default:
+		return StateWaitSrvSecret
+	}
+}
+
+func authHint(kind string) string {
+	switch kind {
+	case mcp.AuthNone:
+		return "Доступ без авторизации."
+	case mcp.AuthBearer:
+		return "Пришлите Bearer-токен одним сообщением."
+	case mcp.AuthAPIKey:
+		return "Пришлите имя заголовка и ключ через пробел. Пример: X-API-Key секрет"
+	case mcp.AuthBasic:
+		return "Пришлите логин и пароль через пробел."
+	case mcp.AuthHeaders:
+		return "Пришлите JSON-объект заголовков."
+	case mcp.AuthOAuth:
+		return "Пришлите client_id заранее зарегистрированного клиента. Если сервер регистрирует клиентов сам, пришлите -"
+	default:
+		return "Выберите способ доступа."
+	}
+}

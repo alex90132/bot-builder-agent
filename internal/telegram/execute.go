@@ -14,7 +14,23 @@ import (
 	"bot-builder-agent/internal/text"
 )
 
+func serverKind(kind router.Kind) bool {
+	switch kind {
+	case router.KindListServers, router.KindServerCard, router.KindAskServerName, router.KindServerNamed,
+		router.KindServerURL, router.KindSetTransport, router.KindSetAuthKind, router.KindSaveServerSecret,
+		router.KindToggleServer, router.KindAskDeleteServer, router.KindDeleteServer, router.KindCheckServer,
+		router.KindBeginOAuth, router.KindImportServers:
+		return true
+	default:
+		return false
+	}
+}
+
 func (b *Bot) execute(userID, chatID int64, res router.Result) {
+	if serverKind(res.Kind) {
+		b.servers(userID, chatID, res)
+		return
+	}
 	ctx := b.baseCtx()
 	switch res.Kind {
 	case router.KindSaveMCPToken:
@@ -187,7 +203,28 @@ func (b *Bot) statusText(ctx context.Context, userID int64) string {
 	if project > 0 {
 		projectLabel = fmt.Sprintf("%d", project)
 	}
-	return fmt.Sprintf("Конструктор: %s\nТокен: %s\nПроект: %s", mcp.Host(endpoint), store.MaskToken(token), projectLabel)
+	lines := []string{
+		fmt.Sprintf("Конструктор: %s\nТокен: %s\nПроект: %s", mcp.Host(endpoint), store.MaskToken(token), projectLabel),
+	}
+	if servers, err := b.store.ListServers(ctx, userID); err == nil {
+		for _, item := range servers {
+			creds, _ := mcp.ParseCredentials(item.AuthJSON)
+			state := "вкл"
+			if !item.Enabled {
+				state = "выкл"
+			}
+			host := item.URL
+			if host == "" {
+				host = "адрес по умолчанию"
+			}
+			line := fmt.Sprintf("%s [%s, %s] %s, %s", item.Name, state, item.Transport, mcp.Host(host), creds.Masked(item.AuthKind))
+			if item.LastError != "" {
+				line += ": " + item.LastError
+			}
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (b *Bot) showProjects(ctx context.Context, userID, chatID int64, res router.Result) {

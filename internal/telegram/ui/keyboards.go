@@ -1,12 +1,17 @@
 package ui
 
-import "github.com/mymmrac/telego"
+import (
+	"strconv"
+
+	"github.com/mymmrac/telego"
+)
 
 const (
 	BtnTask      = "💬 Задача"
 	BtnProjects  = "📁 Проекты"
 	BtnBots      = "🤖 Боты"
 	BtnAccount   = "⚙️ Аккаунт"
+	BtnServers   = "🔌 Серверы"
 	BtnToken     = "🔑 MCP-токен"
 	BtnStatus    = "📊 Статус"
 	BtnReset     = "🧹 Сбросить диалог"
@@ -55,7 +60,7 @@ type BotToken struct {
 // MenuText сообщает, что строка совпадает с кнопкой меню и не должна уходить в модель.
 func MenuText(s string) bool {
 	switch s {
-	case BtnTask, BtnProjects, BtnBots, BtnAccount, BtnToken, BtnStatus, BtnReset, BtnLogout,
+	case BtnTask, BtnProjects, BtnBots, BtnAccount, BtnServers, BtnToken, BtnStatus, BtnReset, BtnLogout,
 		BtnBack, BtnCancel, BtnCreate, BtnActive, BtnArchive, BtnConnect:
 		return true
 	default:
@@ -91,6 +96,7 @@ func MainKeyboard() *telego.ReplyKeyboardMarkup {
 // AccountKeyboard — раздел аккаунта.
 func AccountKeyboard() *telego.ReplyKeyboardMarkup {
 	return reply(
+		[]string{BtnServers},
 		[]string{BtnToken},
 		[]string{BtnStatus},
 		[]string{BtnReset},
@@ -278,7 +284,7 @@ func StopKeyboard() *telego.InlineKeyboardMarkup {
 func MenuButton(screen string) *telego.InlineKeyboardMarkup {
 	data := "menu"
 	switch screen {
-	case "account", "projects", "bots", "wait":
+	case "account", "projects", "bots", "wait", "servers":
 		data = "menu:" + screen
 	}
 	return inline([]telego.InlineKeyboardButton{btn(BtnMenu, data)})
@@ -289,6 +295,7 @@ func ScreenActions(screen string) *telego.InlineKeyboardMarkup {
 	switch screen {
 	case "account":
 		return inline(
+			[]telego.InlineKeyboardButton{btn(BtnServers, "nav:servers")},
 			[]telego.InlineKeyboardButton{btn(BtnToken, "nav:token")},
 			[]telego.InlineKeyboardButton{btn(BtnStatus, "nav:status")},
 			[]telego.InlineKeyboardButton{btn(BtnReset, "nav:reset")},
@@ -308,6 +315,8 @@ func ScreenActions(screen string) *telego.InlineKeyboardMarkup {
 		)
 	case "wait":
 		return inline([]telego.InlineKeyboardButton{btn(BtnCancel, "nav:cancel")})
+	case "servers":
+		return ServerListKeyboard(nil)
 	default:
 		return inline(
 			[]telego.InlineKeyboardButton{btn(BtnTask, "nav:task")},
@@ -351,7 +360,7 @@ func screenOfReply(kb *telego.ReplyKeyboardMarkup) string {
 		}
 	}
 	switch {
-	case has[BtnToken] || has[BtnLogout] || has[BtnReset]:
+	case has[BtnToken] || has[BtnLogout] || has[BtnReset] || has[BtnServers]:
 		return "account"
 	case has[BtnCreate] || has[BtnArchive] || has[BtnActive]:
 		return "projects"
@@ -362,6 +371,68 @@ func screenOfReply(kb *telego.ReplyKeyboardMarkup) string {
 	default:
 		return "main"
 	}
+}
+
+// ServerRow — строка списка MCP без секретов.
+type ServerRow struct {
+	ID      int64
+	Name    string
+	Enabled bool
+}
+
+// ServerListKeyboard — серверы чата и кнопка добавления.
+func ServerListKeyboard(items []ServerRow) *telego.InlineKeyboardMarkup {
+	var rows [][]telego.InlineKeyboardButton
+	for _, item := range items {
+		label := item.Name
+		if !item.Enabled {
+			label = "выкл " + label
+		}
+		if len([]rune(label)) > 40 {
+			label = string([]rune(label)[:37]) + "…"
+		}
+		rows = append(rows, []telego.InlineKeyboardButton{btn(label, formatID("s:open:", item.ID))})
+	}
+	rows = append(rows, []telego.InlineKeyboardButton{btn("Добавить", "s:add")})
+	return inline(rows...)
+}
+
+// ServerCardKeyboard — действия с одним сервером.
+func ServerCardKeyboard(id int64, enabled, oauth bool) *telego.InlineKeyboardMarkup {
+	toggle := btn("Выключить", formatID("s:off:", id))
+	if !enabled {
+		toggle = btn("Включить", formatID("s:on:", id))
+	}
+	rows := [][]telego.InlineKeyboardButton{
+		{btn("Проверить", formatID("s:chk:", id)), toggle},
+		{btn("URL", formatID("s:url:", id)), btn("Удалить", formatID("s:del:", id))},
+		{
+			btn("авто", modeData("s:tr:", id, "auto")),
+			btn("HTTP", modeData("s:tr:", id, "streamable")),
+			btn("SSE", modeData("s:tr:", id, "sse")),
+		},
+		{
+			btn("без авторизации", modeData("s:au:", id, "none")),
+			btn("Bearer", modeData("s:au:", id, "bearer")),
+		},
+		{
+			btn("API-ключ", modeData("s:au:", id, "api_key")),
+			btn("Basic", modeData("s:au:", id, "basic")),
+		},
+		{
+			btn("заголовки", modeData("s:au:", id, "headers")),
+			btn("OAuth", modeData("s:au:", id, "oauth")),
+		},
+	}
+	if oauth {
+		rows = append(rows, []telego.InlineKeyboardButton{btn("Авторизовать OAuth", formatID("s:oa:", id))})
+	}
+	rows = append(rows, []telego.InlineKeyboardButton{btn(BtnBackList, "s:list")})
+	return inline(rows...)
+}
+
+func modeData(prefix string, id int64, mode string) string {
+	return prefix + strconv.FormatInt(id, 10) + ":" + mode
 }
 
 func trimAt(s string) string {

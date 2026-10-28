@@ -16,6 +16,7 @@ import (
 	"bot-builder-agent/internal/config"
 	"bot-builder-agent/internal/logger"
 	"bot-builder-agent/internal/mcp"
+	"bot-builder-agent/internal/mcphub"
 	"bot-builder-agent/internal/openrouter"
 	"bot-builder-agent/internal/store"
 	"bot-builder-agent/internal/telegram/router"
@@ -49,6 +50,7 @@ type Bot struct {
 	log    *logger.Logger
 	store  *store.Store
 	mcp    *mcp.Client
+	hub    *mcphub.Hub
 	runner agentRunner
 
 	root context.Context
@@ -61,16 +63,21 @@ type Bot struct {
 }
 
 type session struct {
-	state    router.State
-	renameID int64
-	busy     bool
-	cancel   context.CancelFunc
+	state        router.State
+	renameID     int64
+	busy         bool
+	cancel       context.CancelFunc
+	srvID        int64
+	srvName      string
+	srvURL       string
+	srvTransport string
+	srvAuth      string
 }
 
 var _ tgAPI = (*liveAPI)(nil)
 
 // New создаёт бота. Сеть на этом шаге не нужна.
-func New(cfg *config.Config, log *logger.Logger, st *store.Store, mcpClient *mcp.Client, runner *agent.Runner) (*Bot, error) {
+func New(cfg *config.Config, log *logger.Logger, st *store.Store, mcpClient *mcp.Client, runner *agent.Runner, hub *mcphub.Hub) (*Bot, error) {
 	api, err := newLiveAPI(cfg.TelegramBotToken)
 	if err != nil {
 		return nil, fmt.Errorf("telegram: %w", err)
@@ -81,6 +88,7 @@ func New(cfg *config.Config, log *logger.Logger, st *store.Store, mcpClient *mcp
 		log:    log,
 		store:  st,
 		mcp:    mcpClient,
+		hub:    hub,
 		runner: runner,
 		locks:  map[int64]*sync.Mutex{},
 		sess:   map[int64]*session{},
@@ -105,6 +113,7 @@ func (b *Bot) Start(ctx context.Context) error {
 			{Command: "bots", Description: "Боты активного проекта"},
 			{Command: "reset", Description: "Очистить диалог"},
 			{Command: "logout", Description: "Забыть токен"},
+			{Command: "servers", Description: "MCP-серверы чата"},
 			{Command: "cancel", Description: "Отменить ввод"},
 		},
 	}); err != nil {
@@ -158,6 +167,9 @@ func (b *Bot) process(upd telego.Update) {
 		RenameProjectID: sess.renameID,
 	})
 	sess.state = res.Next
+	if res.ServerID != 0 {
+		sess.srvID = res.ServerID
+	}
 	if res.Next != router.StateWaitRename {
 		sess.renameID = 0
 	}
@@ -218,14 +230,15 @@ func (b *Bot) runAgent(ctx context.Context, userID, chatID int64, task string, f
 		return
 	}
 	token, endpoint, err := b.store.Access(ctx, userID)
-	if err != nil || strings.TrimSpace(token) == "" {
-		b.say(chatID, "Сначала задайте MCP-токен в разделе «Аккаунт».", ui.AccountKeyboard())
+	if err != nil {
+		b.say(chatID, "Не удалось прочитать подключения.", ui.AccountKeyboard())
 		return
 	}
 	projectID, _ := b.store.ActiveProject(ctx, userID)
 	result, err := b.runner.Run(ctx, agent.Request{
 		Token:         token,
 		Endpoint:      endpoint,
+		UserID:        userID,
 		History:       toOR(history),
 		UserText:      task,
 		Images:        b.loadImages(ctx, fileIDs),
@@ -343,6 +356,10 @@ func screenMarkup(state router.State) telego.ReplyMarkup {
 			return ui.WaitKeyboard()
 		}
 		return ui.BotsKeyboard()
+	case router.StateServers:
+		return ui.AccountKeyboard()
+	case router.StateWaitSrvName, router.StateWaitSrvURL, router.StateWaitSrvSecret, router.StateWaitSrvChoice:
+		return ui.WaitKeyboard()
 	default:
 		return ui.MainKeyboard()
 	}

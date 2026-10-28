@@ -13,6 +13,7 @@ type Callback struct {
 	Page      int
 	ProjectID int64
 	TokenID   int64
+	ServerID  int64
 	Days      int
 	Archived  bool
 	Yes       bool
@@ -49,6 +50,13 @@ func ParseCallback(data string) (Callback, bool) {
 		if len(parts) == 2 && parts[1] == "logout" {
 			return Callback{Name: "logout", Yes: yes}, true
 		}
+		if len(parts) == 3 && parts[1] == "sdel" {
+			id, ok := atoi64(parts[2])
+			if !ok {
+				return Callback{}, false
+			}
+			return Callback{Name: "srv_del", Yes: yes, ServerID: id}, true
+		}
 		if len(parts) == 3 && parts[1] == "pdel" {
 			id, ok := atoi64(parts[2])
 			if !ok {
@@ -72,8 +80,55 @@ func ParseCallback(data string) (Callback, bool) {
 		return parseProject(parts)
 	case "b":
 		return parseBot(parts)
+	case "s":
+		return parseServer(parts)
 	}
 	return Callback{}, false
+}
+
+func parseServer(parts []string) (Callback, bool) {
+	if len(parts) < 2 {
+		return Callback{}, false
+	}
+	switch parts[1] {
+	case "list":
+		return Callback{Name: "srv_list"}, len(parts) == 2
+	case "add":
+		return Callback{Name: "srv_add"}, len(parts) == 2
+	case "open", "on", "off", "chk", "url", "oa", "del":
+		if len(parts) != 3 {
+			return Callback{}, false
+		}
+		id, ok := atoi64(parts[2])
+		if !ok {
+			return Callback{}, false
+		}
+		name := map[string]string{
+			"open": "srv_open",
+			"on":   "srv_on",
+			"off":  "srv_off",
+			"chk":  "srv_check",
+			"url":  "srv_url",
+			"oa":   "srv_oauth",
+			"del":  "srv_del_ask",
+		}[parts[1]]
+		return Callback{Name: name, ServerID: id}, true
+	case "tr", "au":
+		if len(parts) != 4 || parts[3] == "" {
+			return Callback{}, false
+		}
+		id, ok := atoi64(parts[2])
+		if !ok {
+			return Callback{}, false
+		}
+		name := "srv_transport"
+		if parts[1] == "au" {
+			name = "srv_auth"
+		}
+		return Callback{Name: name, ServerID: id, Screen: parts[3]}, true
+	default:
+		return Callback{}, false
+	}
 }
 
 func parseMenu(parts []string) (Callback, bool) {
@@ -86,7 +141,7 @@ func parseMenu(parts []string) (Callback, bool) {
 	switch parts[1] {
 	case "main", "chat":
 		return Callback{Name: "menu", Screen: "main"}, true
-	case "account", "projects", "bots", "wait":
+	case "account", "projects", "bots", "wait", "servers":
 		return Callback{Name: "menu", Screen: parts[1]}, true
 	default:
 		return Callback{}, false
@@ -96,7 +151,7 @@ func parseMenu(parts []string) (Callback, bool) {
 func knownNav(action string) bool {
 	switch action {
 	case "task", "projects", "bots", "account", "token", "status", "reset", "logout",
-		"back", "cancel", "create", "active", "archive", "connect":
+		"back", "cancel", "create", "active", "archive", "connect", "servers":
 		return true
 	default:
 		return false

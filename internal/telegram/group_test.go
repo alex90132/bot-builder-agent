@@ -91,17 +91,18 @@ func TestDirectedAtGroup(t *testing.T) {
 func TestGroupProcessSkipsPlainText(t *testing.T) {
 	b, api, run := newTestBot(t)
 	b.self = telego.User{ID: 99, Username: "builder", IsBot: true}
+	var calls int
 	run.fn = func(context.Context, agent.Request) (agent.Result, error) {
-		t.Fatal("агент не должен стартовать на чужой реплике")
-		return agent.Result{}, nil
+		calls++
+		return agent.Result{Reply: "ок"}, nil
 	}
 	b.process(telego.Update{Message: &telego.Message{
 		From: &telego.User{ID: 7},
 		Chat: telego.Chat{ID: -100, Type: telego.ChatTypeSupergroup},
 		Text: "просто болтаем",
 	}})
-	if lines := api.snapshot(); len(lines) != 0 {
-		t.Fatalf("бот ответил: %+v", lines)
+	if calls != 0 || len(api.snapshot()) != 0 {
+		t.Fatalf("бот ответил на чужую реплику: %+v", api.snapshot())
 	}
 
 	b.process(telego.Update{Message: &telego.Message{
