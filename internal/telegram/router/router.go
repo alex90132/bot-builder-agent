@@ -72,6 +72,7 @@ type Input struct {
 	Text            string
 	Callback        string
 	HasToken        bool
+	HasImage        bool
 	Allowed         bool
 	Busy            bool
 	Group           bool
@@ -236,6 +237,9 @@ func askFromText(in Input) Result {
 		return needAccount(in)
 	}
 	if in.Text == "" {
+		if in.HasImage {
+			return Result{Kind: KindAskAgent, Next: StateChat, Payload: "Что на изображении?"}
+		}
 		return Result{Kind: KindReply, Next: StateChat, Text: "Опишите задачу текстом."}
 	}
 	return Result{Kind: KindAskAgent, Next: StateChat, Payload: in.Text, Text: in.Text}

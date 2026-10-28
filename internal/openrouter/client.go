@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -24,6 +25,7 @@ type Message struct {
 	Name       string     `json:"name,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Images     []string   `json:"-"`
 }
 
 // Tool — функция, которую можно отдать модели.
@@ -75,6 +77,20 @@ func (c *Client) Complete(ctx context.Context, req Request) (Message, error) {
 			Content:    m.Content,
 			Name:       m.Name,
 			ToolCallID: m.ToolCallID,
+		}
+		if len(m.Images) > 0 {
+			parts := make([]openai.ChatMessagePart, 0, 1+len(m.Images))
+			if strings.TrimSpace(m.Content) != "" {
+				parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: m.Content})
+			}
+			for _, img := range m.Images {
+				parts = append(parts, openai.ChatMessagePart{
+					Type:     openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{URL: img},
+				})
+			}
+			msg.Content = ""
+			msg.MultiContent = parts
 		}
 		for _, tc := range m.ToolCalls {
 			msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{

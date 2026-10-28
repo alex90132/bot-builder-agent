@@ -11,6 +11,7 @@ import (
 	"bot-builder-agent/internal/mcp"
 	"bot-builder-agent/internal/openrouter"
 	"bot-builder-agent/internal/text"
+	"bot-builder-agent/internal/websearch"
 )
 
 const forceText = "Инструменты больше недоступны. Ответь пользователю обычным текстом по уже собранной информации. Не пиши названия функций."
@@ -19,6 +20,7 @@ const forceText = "Инструменты больше недоступны. О�
 type Runner struct {
 	OR             *openrouter.Client
 	MCP            *mcp.Client
+	Web            *websearch.Client
 	Model          string
 	MaxRounds      int
 	MaxResultChars int
@@ -31,6 +33,7 @@ type Request struct {
 	Token         string
 	History       []openrouter.Message
 	UserText      string
+	Images        []string
 	Endpoint      string
 	ActiveProject int64
 	OnTool        func(name string)
@@ -78,15 +81,21 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			Parameters:  params,
 		})
 	}
+	for _, tool := range localTools() {
+		names = append(names, tool.Name)
+		otools = append(otools, tool)
+	}
 
 	msgs := []openrouter.Message{{
 		Role:    "system",
 		Content: SystemPrompt(req.ActiveProject),
 	}}
 	msgs = append(msgs, req.History...)
-	userMsg := openrouter.Message{Role: "user", Content: req.UserText}
+	userMsg := openrouter.Message{Role: "user", Content: req.UserText, Images: req.Images}
 	msgs = append(msgs, userMsg)
-	transcript := []openrouter.Message{userMsg}
+	stored := userMsg
+	stored.Images = nil
+	transcript := []openrouter.Message{stored}
 
 	for round := 0; round < maxRounds; round++ {
 		if err := ctx.Err(); err != nil {
@@ -181,6 +190,10 @@ func (r *Runner) execTools(ctx context.Context, req Request, calls []openrouter.
 			defer func() { <-sem }()
 			if req.OnTool != nil {
 				req.OnTool(call.Name)
+			}
+			if textOut, ok := r.localTool(ctx, call); ok {
+				outs[i] = toolOut{id: call.ID, name: call.Name, content: text.Truncate(textOut, maxChars)}
+				return
 			}
 			textOut, isErr, err := r.MCP.CallTool(ctx, req.Endpoint, req.Token, call.Name, json.RawMessage(call.Arguments))
 			if err != nil {

@@ -35,6 +35,7 @@ type tgAPI interface {
 	SendRichMessage(ctx context.Context, params *RichSendParams) (*telego.Message, error)
 	EditRichMessage(ctx context.Context, params *RichEditParams) (*telego.Message, error)
 	DeleteMessage(ctx context.Context, params *telego.DeleteMessageParams) error
+	Download(ctx context.Context, fileID string) ([]byte, string, error)
 }
 
 type agentRunner interface {
@@ -149,6 +150,7 @@ func (b *Bot) process(upd telego.Update) {
 		Text:            textValue,
 		Callback:        callback,
 		HasToken:        b.hasToken(uid),
+		HasImage:        len(imageFileIDs(upd.Message)) > 0,
 		Allowed:         b.cfg.Allowed(uid),
 		Busy:            sess.busy,
 		Group:           chat < 0,
@@ -170,7 +172,7 @@ func (b *Bot) process(upd telego.Update) {
 		sess.cancel = cancel
 		um.Unlock()
 		um = nil
-		b.runAgent(ctx, uid, chat, res.Payload)
+		b.runAgent(ctx, uid, chat, res.Payload, imageFileIDs(upd.Message))
 		cancel()
 		sess2, um2 := b.lockUser(uid)
 		sess2.busy = false
@@ -198,7 +200,7 @@ func (b *Bot) process(upd telego.Update) {
 	}
 }
 
-func (b *Bot) runAgent(ctx context.Context, userID, chatID int64, task string) {
+func (b *Bot) runAgent(ctx context.Context, userID, chatID int64, task string, fileIDs []string) {
 	// «Думаю…» и «Вызываю …» — обычное сообщение с кнопкой «Стоп».
 	// send сюда нельзя: ReplyKeyboardRemove делает сообщение нередактируемым,
 	// и правка на «Вызываю» не проходит. В конце статус удаляется. Если delete
@@ -226,6 +228,7 @@ func (b *Bot) runAgent(ctx context.Context, userID, chatID int64, task string) {
 		Endpoint:      endpoint,
 		History:       toOR(history),
 		UserText:      task,
+		Images:        b.loadImages(ctx, fileIDs),
 		ActiveProject: projectID,
 		OnTool: func(name string) {
 			if statusID == 0 {

@@ -102,6 +102,10 @@ func TestAllowlistAndTokenWait(t *testing.T) {
 	if add.Kind != KindAddBotToken || add.ProjectID != 9 {
 		t.Fatalf("%+v", add)
 	}
+	photo := Handle(Input{State: StateMain, Allowed: true, HasToken: true, HasImage: true})
+	if photo.Kind != KindAskAgent || photo.Payload != "Что на изображении?" {
+		t.Fatalf("фото: %+v", photo)
+	}
 	bare := Handle(Input{State: StateProjects, Allowed: true, HasToken: true, Text: "mcp_zzzzzzzz"})
 	if bare.Kind != KindSaveMCPToken {
 		t.Fatal("голый mcp-токен")

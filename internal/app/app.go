@@ -12,6 +12,7 @@ import (
 	"bot-builder-agent/internal/openrouter"
 	"bot-builder-agent/internal/store"
 	"bot-builder-agent/internal/telegram"
+	"bot-builder-agent/internal/websearch"
 )
 
 // App связывает хранилище, MCP, модель и Telegram.
@@ -49,6 +50,7 @@ func (a *App) Run(ctx context.Context) error {
 		MaxResultChars: a.cfg.MaxResultChars,
 		MaxTokens:      a.cfg.AIMaxTokens,
 		Temperature:    float32(a.cfg.AITemperature),
+		Web:            websearch.New(a.cfg.SearxURL, a.cfg.WebProxy),
 	}
 	bot, err := telegram.New(a.cfg, a.log, st, mcpClient, runner)
 	if err != nil {

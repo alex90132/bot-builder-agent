@@ -34,6 +34,9 @@ type Config struct {
 	DatabaseURL string
 	LogLevel    string
 	LogFile     string
+
+	SearxURL string
+	WebProxy string
 }
 
 // Load читает .env и окружение. Уже заданные переменные .env не затирает.
@@ -52,6 +55,8 @@ func FromEnv() (*Config, error) {
 		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		LogLevel:         envDefault("LOG_LEVEL", "INFO"),
 		LogFile:          envDefault("LOG_FILE", "logs/bot-builder-agent.log"),
+		SearxURL:         envDefault("SEARXNG_URL", "http://localhost:8890"),
+		WebProxy:         strings.TrimSpace(os.Getenv("WEB_PROXY")),
 	}
 	if cfg.TelegramBotToken == "" {
 		return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN не задан")

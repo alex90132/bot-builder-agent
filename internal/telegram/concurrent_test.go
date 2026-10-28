@@ -472,6 +472,10 @@ func (f *fakeAPI) EditRichMessage(_ context.Context, params *RichEditParams) (*t
 	return &telego.Message{MessageID: params.MessageID, Text: text}, nil
 }
 
+func (f *fakeAPI) Download(context.Context, string) ([]byte, string, error) {
+	return nil, "", nil
+}
+
 func (f *fakeAPI) DeleteMessage(_ context.Context, params *telego.DeleteMessageParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
